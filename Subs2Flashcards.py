@@ -1,10 +1,12 @@
 import srt
+import subprocess
 import os
 from datetime import timedelta
 
-FFMPEG = 'ffmpeg'
+FFMPEG = "ffmpeg"
+MP3GAIN = "mp3gain"
 SCREENSHOT_W = 400
-PAD = 0.35
+PAD = 0.4
 
 def preprocess_subs( contents ):
     generator = srt.parse(contents)
@@ -26,26 +28,22 @@ def get_screenshot_command( timestamp, video, output_filename ):
     # print( command )
     return command
 
-def get_entry_commands( timestamp_start, timestamp_end, video_in, tag ):
+def get_entry_commands( timestamp_start, timestamp_end, video_in, tag, ep_nb ):
     timestamp_mid = timestamp_start + (timestamp_end - timestamp_start)/2
 
-    name_audio = f"{tag}_{timestamp_start.total_seconds():09.3f}-{timestamp_end.total_seconds():09.3f}.mp3"
-    name_screenshot = f"{tag}_{timestamp_mid.total_seconds():09.3f}.jpg"
+    name_audio = f"{tag}_{ep_nb}_{timestamp_start.total_seconds():09.3f}-{timestamp_end.total_seconds():09.3f}.mp3"
+    name_screenshot = f"{tag}_{ep_nb}_{timestamp_mid.total_seconds():09.3f}.jpg"
 
     command_audio = get_audio_extraction_command( timestamp_start, timestamp_end, video_in, f"{tag}/{name_audio}" )
     command_screenshot = get_screenshot_command(timestamp_mid, video_in, f"{tag}/{name_screenshot}" )
 
     return name_audio, name_screenshot, command_audio, command_screenshot
 
-def export_audio( commands  ):
+def batch_run_cmd( commands ):
     for command in commands:
-        os.system( command )
+        subprocess.run( command, shell=True )
 
-def export_screenshots( commands ):
-    for command in commands:
-        os.system( command )
-
-def process_subs( subs_info, video_in, tag ):
+def process_subs( subs_info, video_in, tag, ep_nb ):
     output_txt = []
     commands_audio = []
     commands_screenshot = []
@@ -71,10 +69,10 @@ def process_subs( subs_info, video_in, tag ):
         if timestamp_start.total_seconds() < 0:
             timestamp_start = timedelta(seconds=0)
         
-        name_audio, name_screenshot, command_audio, command_screenshot = get_entry_commands( timestamp_start, timestamp_end, video_in, tag )
+        name_audio, name_screenshot, command_audio, command_screenshot = get_entry_commands( timestamp_start, timestamp_end, video_in, tag, ep_nb )
         
         # Generate line for output
-        output_txt.append( f"{line_current}\t\t\t{line_before}\t{line_after}\t<img src=\"{name_screenshot}\">\t[sound:{name_audio}]\t\n" )
+        output_txt.append( f"{tag}\t{line_current}\t\t\t{line_before}\t{line_after}\t<img src=\"{name_screenshot}\">\t[sound:{name_audio}]\t\n" )
         
         commands_audio.append( command_audio )
         commands_screenshot.append( command_screenshot )
@@ -86,26 +84,63 @@ def export_text( output_txt, output_file ):
         f.write( line )
     f.close()
 
+def find_files( ):
+    (_, _, filenames) = next(os.walk('.'))
+    videos = list()
+    for filename in filenames:
+        if filename.endswith(".mkv"):
+            videos.append(filename)
+    
+    videosOut = list()
+    srtsOut = list()
+    for video in videos:
+        for filename in filenames:
+            if (video[0:-3] in filename) and filename.endswith(".srt"):
+                videosOut.append(video)
+                srtsOut.append(filename)
+                break
+    print(videosOut)
+    print(srtsOut)
+    return videosOut, srtsOut
+
+def normalise_audio( folder ):
+    print("Normalising audio...")
+    (_, _, filenames) = next(os.walk( folder ))
+    mp3s = list()
+    for filename in filenames:
+        if filename.endswith(".mp3"):
+            mp3s.append(filename)
+    
+    for mp3 in mp3s:
+        subprocess.run( f"{MP3GAIN} -r -k \"{folder}/{mp3}\"", shell=True )
+
 def main():
-    # Set options
-    subs_in = "<PATH>/<NAME>.jpn.srt"
-    video_in = "<PATH>/<NAME>.mkv"
-    tag = "test"
+    # Find files
+    videos, subs = find_files()
+    subs_in = f"./{subs[0]}"
+    video_in =  f"./{videos[0]}"
+
+    # Get tag name and episode from user
+    tag = input("Tag name: ")
+    ep_nb  = input("Episode number: ")
 
     output_file = f"{tag}.tsv"
     output_folder = f'{tag}'
-    os.system( f"mkdir {output_folder}" )
+    subprocess.run( f"mkdir \"{output_folder}\"", shell=True )
 
     f = open(subs_in, "r", encoding="utf-8-sig")
     if f.mode == 'r':
         contents = f.read()
         subs_info = preprocess_subs( contents )
-        output_txt, commands_audio, commands_screenshot = process_subs( subs_info, video_in, tag )
+        output_txt, commands_audio, commands_screenshot = process_subs( subs_info, video_in, tag, ep_nb )
         export_text( output_txt, output_file )
-        export_audio( commands_audio )
-        export_screenshots( commands_screenshot )
-        print("done_main")
+        print("Extracting audio...")
+        batch_run_cmd( commands_audio )
+        print("Taking screenshots...")
+        batch_run_cmd( commands_screenshot )
+
+        normalise_audio( f"./{output_folder}" )
+        print("All done")
 
 if __name__ == "__main__":
     main()
-    print('done')
