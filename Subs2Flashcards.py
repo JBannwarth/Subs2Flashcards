@@ -120,6 +120,11 @@ def main():
     subs_in = f"./{subs[0]}"
     video_in =  f"./{videos[0]}"
 
+    # Print files that were detected
+    print( "Detected:" )
+    print( video_in )
+    print( subs_in )
+
     # Get tag name and episode from user
     tag = input("Tag name: ")
     ep_nb  = input("Episode number: ")
